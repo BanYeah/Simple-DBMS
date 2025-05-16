@@ -1,0 +1,12 @@
+# IntelliJ IDEA project files
+.idea/
+*.iml
+
+# Java class files
+*.class
+
+# Maven build output files
+target/
+
+# Assignment test code files
+test_code/
