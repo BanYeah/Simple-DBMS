@@ -1,7 +1,7 @@
 package simpledb.query;
 
 public class UnionScan implements Scan {
-    private Scan s1, s2;
+    private final Scan s1, s2;
     private int turn = 1;
 
     /**
@@ -17,6 +17,7 @@ public class UnionScan implements Scan {
     public void beforeFirst() {
         s1.beforeFirst();
         s2.beforeFirst();
+        turn = 1;
     }
 
     public boolean next() {

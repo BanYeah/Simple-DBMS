@@ -40,7 +40,10 @@ public class RenameScan implements Scan {
     }
 
     public boolean hasField(String fldname) {
-        return s.hasField(fldname);
+        if (fldname.equals(newName))
+            return s.hasField(oldName);
+        else
+            return s.hasField(fldname);
     }
 
     public void close() {
