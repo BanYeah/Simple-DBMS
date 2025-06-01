@@ -6,7 +6,7 @@ public class BlockId {
 
    public BlockId(String filename, int blknum) {
       this.filename = filename;
-      this.blknum   = blknum;
+      this.blknum = blknum;
    }
 
    public String fileName() {

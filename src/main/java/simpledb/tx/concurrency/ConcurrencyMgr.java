@@ -12,13 +12,17 @@ import simpledb.file.BlockId;
  * @author Edward Sciore
  */
 public class ConcurrencyMgr {
-
+   private final int txnum;
    /**
     * The global lock table. This variable is static because 
     * all transactions share the same table.
     */
-   private static LockTable locktbl = new LockTable();
-   private Map<BlockId,String> locks  = new HashMap<BlockId,String>();
+   private static final LockTable locktbl = new LockTable();
+   private final Map<BlockId, String> locks  = new HashMap<>();
+
+   public ConcurrencyMgr(int txnum) {
+      this.txnum = txnum;
+   }
 
    /**
     * Obtain an SLock on the block, if necessary.
@@ -28,7 +32,7 @@ public class ConcurrencyMgr {
     */
    public void sLock(BlockId blk) {
       if (locks.get(blk) == null) {
-         locktbl.sLock(blk);
+         locktbl.sLock(blk, txnum);
          locks.put(blk, "S");
       }
    }
@@ -43,7 +47,7 @@ public class ConcurrencyMgr {
    public void xLock(BlockId blk) {
       if (!hasXLock(blk)) {
          sLock(blk);
-         locktbl.xLock(blk);
+         locktbl.xLock(blk, txnum);
          locks.put(blk, "X");
       }
    }
@@ -54,7 +58,7 @@ public class ConcurrencyMgr {
     */
    public void release() {
       for (BlockId blk : locks.keySet()) 
-         locktbl.unlock(blk);
+         locktbl.unlock(blk, txnum);
       locks.clear();
    }
 

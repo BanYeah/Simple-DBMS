@@ -13,14 +13,14 @@ import simpledb.tx.concurrency.ConcurrencyMgr;
  * @author Edward Sciore
  */
 public class Transaction {
-   private static int nextTxNum = 0;
+   private static int nextTxNum = 0; /* ID of the transaction */
    private static final int END_OF_FILE = -1;
-   private RecoveryMgr    recoveryMgr;
-   private ConcurrencyMgr concurMgr;
-   private BufferMgr bm;
-   private FileMgr fm;
-   private int txnum;
-   private BufferList mybuffers;
+   private final int txnum;
+   private final FileMgr fm;
+   private final BufferMgr bm;
+   private final RecoveryMgr recoveryMgr;
+   private final ConcurrencyMgr concurMgr;
+   private final BufferList mybuffers;
    
    /**
     * Create a new transaction and its associated 
@@ -29,17 +29,17 @@ public class Transaction {
     * managers that it gets from the class
     * {@link simpledb.server.SimpleDB}.
     * Those objects are created during system initialization.
-    * Thus this constructor cannot be called until either
-    * {@link simpledb.server.SimpleDB#init(String)} or 
+    * Thus, this constructor cannot be called until either
+    * {@link simpledb.server.SimpleDB#init(String)} or
     * {@link simpledb.server.SimpleDB#initFileLogAndBufferMgr(String)} or
     * is called first.
     */
    public Transaction(FileMgr fm, LogMgr lm, BufferMgr bm) {
+      txnum = nextTxNumber();
       this.fm = fm;
       this.bm = bm;
-      txnum       = nextTxNumber();
       recoveryMgr = new RecoveryMgr(this, txnum, lm, bm);
-      concurMgr   = new ConcurrencyMgr();
+      concurMgr = new ConcurrencyMgr(txnum);
       mybuffers = new BufferList(bm);
    }
    

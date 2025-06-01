@@ -15,9 +15,7 @@ import simpledb.file.BlockId;
  * @author Edward Sciore
  */
 class LockTable {
-   private static final long MAX_TIME = 10000; // 10 seconds
-   
-   private Map<BlockId,Integer> locks = new HashMap<BlockId,Integer>();
+   private final Map<BlockId, List<Integer>> locks = new HashMap<>();
    
    /**
     * Grant an SLock on the specified block.
@@ -29,18 +27,25 @@ class LockTable {
     * then an exception is thrown.
     * @param blk a reference to the disk block
     */
-   public synchronized void sLock(BlockId blk) {
-      try {
-         long timestamp = System.currentTimeMillis();
-         while (hasXlock(blk) && !waitingTooLong(timestamp))
-            wait(MAX_TIME);
-         if (hasXlock(blk))
-            throw new LockAbortException();
-         int val = getLockVal(blk);  // will not be negative
-         locks.put(blk, val+1);
-      }
-      catch(InterruptedException e) {
-         throw new LockAbortException();
+   public synchronized void sLock(BlockId blk, int txnum) { // slock: shared lock (Read-only)
+      while(true) { // wait
+         if (locks.get(blk) == null) { // unlock
+            locks.put(blk, new ArrayList<>());
+            locks.get(blk).add(txnum);
+            break;
+         } else if (locks.get(blk).get(0) < 0) { // xlock
+            if (-locks.get(blk).get(0) < txnum)
+               throw new LockAbortException(); // die
+            else // wait
+               try {
+                  wait();
+               } catch (InterruptedException e) {
+                  throw new LockAbortException();
+               }
+         } else { // slock
+            locks.get(blk).add(txnum);
+            break;
+         }
       }
    }
    
@@ -54,17 +59,35 @@ class LockTable {
     * then an exception is thrown.
     * @param blk a reference to the disk block
     */
-   synchronized void xLock(BlockId blk) {
-      try {
-         long timestamp = System.currentTimeMillis();
-         while (hasOtherSLocks(blk) && !waitingTooLong(timestamp))
-            wait(MAX_TIME);
-         if (hasOtherSLocks(blk))
-            throw new LockAbortException();
-         locks.put(blk, -1);
-      }
-      catch(InterruptedException e) {
-         throw new LockAbortException();
+   synchronized void xLock(BlockId blk, int txnum) { // xlock: Exclusive lock (Write-only)
+      while(true) { // wait
+         if (locks.get(blk) == null) { // unlock
+            continue;
+         } else if (locks.get(blk).get(0) < 0) { // xlock
+            if (-locks.get(blk).get(0) < txnum)
+               throw new LockAbortException(); // die
+            else // wait
+               try {
+                  wait();
+               } catch (InterruptedException e) {
+                  throw new LockAbortException();
+               }
+         } else { // slock
+            if (locks.get(blk).size() == 1 && locks.get(blk).get(0) == txnum) { // slock with same txnum
+               locks.get(blk).set(0, -txnum); // upgrade it to xlock
+               break;
+            }
+
+            Collections.sort(locks.get(blk));
+            if (locks.get(blk).get(0) < txnum)
+               throw new LockAbortException(); // die
+            else // wait
+               try {
+                  wait();
+               } catch (InterruptedException e) {
+                  throw new LockAbortException();
+               }
+         }
       }
    }
    
@@ -74,30 +97,17 @@ class LockTable {
     * then the waiting transactions are notified.
     * @param blk a reference to the disk block
     */
-   synchronized void unlock(BlockId blk) {
-      int val = getLockVal(blk);
-      if (val > 1)
-         locks.put(blk, val-1);
-      else {
-         locks.remove(blk);
+   synchronized void unlock(BlockId blk, int txnum) {
+      if (locks.get(blk).get(0) < 0) // xlock
+         if (locks.get(blk).get(0) == -txnum) {
+            locks.remove(blk);
+            notifyAll();
+         }
+      else { // slock
+         locks.get(blk).remove((Integer) txnum);
+         if (locks.get(blk).isEmpty())
+            locks.remove(blk);
          notifyAll();
       }
-   }
-   
-   private boolean hasXlock(BlockId blk) {
-      return getLockVal(blk) < 0;
-   }
-   
-   private boolean hasOtherSLocks(BlockId blk) {
-      return getLockVal(blk) > 1;
-   }
-   
-   private boolean waitingTooLong(long starttime) {
-      return System.currentTimeMillis() - starttime > MAX_TIME;
-   }
-   
-   private int getLockVal(BlockId blk) {
-      Integer ival = locks.get(blk);
-      return (ival == null) ? 0 : ival.intValue();
    }
 }
