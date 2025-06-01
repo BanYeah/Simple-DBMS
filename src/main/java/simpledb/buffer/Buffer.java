@@ -13,21 +13,30 @@ import simpledb.log.LogMgr;
  * @author Edward Sciore
  */
 public class Buffer {
-   private FileMgr fm;  /* File manager */
-   private LogMgr lm;   /* Log manager */
-   private Page contents; /* buffered page */
-   private BlockId blk = null;  /* ID of the block */
-   private int pins = 0;  /* the number of times the buffer has been pinned */
-   private int txnum = -1;  /* dirty flag. The ID of the modifying transaction for this buffer */
-   private int lsn = -1;   /* log sequence number */
+   private final int id;
+   private final FileMgr fm;     /* File manager */
+   private final LogMgr lm;      /* Log manager */
+   private final Page contents;  /* buffered page */
+   private BlockId blk = null;   /* ID of the block */
+   private int pins = 0;         /* the number of times the buffer has been pinned */
+   private int txnum = -1;       /* dirty flag. The ID of the modifying transaction for this buffer */
+   private int lsn = -1;         /* log sequence number */
 
    /**
     * Constructor 
     */
-   public Buffer(FileMgr fm, LogMgr lm) {
+   public Buffer(FileMgr fm, LogMgr lm, int id) {
+      this.id = id;
       this.fm = fm;
       this.lm = lm;
       contents = new Page(fm.blockSize());
+   }
+
+   /**
+    * Returns the id of this buffer
+    */
+   public int getId() {
+      return id;
    }
    
    /**
@@ -83,9 +92,9 @@ public class Buffer {
     * @param b a reference to the data block
     */
    void assignToBlock(BlockId b) {
-      flush();
+      flush(); // if the buffer is dirty, flush to disk
       blk = b;
-      fm.read(blk, contents);
+      fm.read(blk, contents);  // read the contents of the specified block
       pins = 0;
    }
    
@@ -94,9 +103,9 @@ public class Buffer {
     * and write the buffer to its disk block 
     */
    void flush() {
-      if (txnum >= 0) {
-         lm.flush(lsn);  
-         fm.write(blk, contents);
+      if (txnum >= 0) {            // if the buffer is dirty,
+         lm.flush(lsn);            // write the log entry in a log file
+         fm.write(blk, contents);  // write the buffer to its disk block
          txnum = -1;
       }
    }

@@ -3,15 +3,21 @@ package simpledb.buffer;
 import simpledb.file.*;
 import simpledb.log.LogMgr;
 
+import java.util.LinkedList;
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Manages the pinning and unpinning of buffers to blocks.
  * @author Edward Sciore
  *
  */
 public class BufferMgr {
-   private Buffer[] bufferpool; /* buffer pool */ 
-   private int numAvailable;   /* the number of available (unpinned) buffer slots */
-   private static final long MAX_TIME = 10000; /* 10 seconds */
+   private final LinkedList<Buffer> unpinnedBuffers; /* LRU list */
+   private final LinkedList<Buffer> unallocatedBuffers;
+   private final Map<BlockId, Buffer> allocatedBuffers;
+   private int numAvailable;                    /* the number of available (unpinned) buffer slots */
+   private static final long MAX_TIME = 10000;  /* 10 seconds */
    
    /**
     * Constructor:  Creates a buffer manager having the specified 
@@ -21,10 +27,34 @@ public class BufferMgr {
     * @param numbuffs the number of buffer slots to allocate
     */
    public BufferMgr(FileMgr fm, LogMgr lm, int numbuffs) {
-      bufferpool = new Buffer[numbuffs];
+      unpinnedBuffers = new LinkedList<>();
+      unallocatedBuffers = new LinkedList<>();
+      for (int i = 0; i < numbuffs; i++)
+         unallocatedBuffers.addLast(new Buffer(fm, lm, i));
+
+      allocatedBuffers = new HashMap<>();
       numAvailable = numbuffs;
-      for (int i=0; i<numbuffs; i++)
-         bufferpool[i] = new Buffer(fm, lm);
+   }
+
+   /**
+    * Displays its current status.
+    * The status consists of the ID, block, and pinned status of each buffer in the allocated map,
+    * plus the IDs of each buffer in the unpinned list.
+    */
+   public synchronized void printStatus() {
+      System.out.println("Allocated Buffers:");
+      for (Buffer buff : allocatedBuffers.values()) {
+         System.out.print("Buffer " + buff.getId() + ": " + buff.block().toString());
+         if (buff.isPinned())
+            System.out.println(" pinned");
+         else
+            System.out.println(" unpinned");
+      }
+
+      System.out.print("Unpinned Buffers in LRU order: ");
+      for (Buffer buff : unpinnedBuffers)
+         System.out.print(buff.getId() + " ");
+      System.out.println();
    }
    
    /**
@@ -40,9 +70,9 @@ public class BufferMgr {
     * @param txnum the transaction's id number
     */
    public synchronized void flushAll(int txnum) {
-      for (Buffer buff : bufferpool)
+      for (Buffer buff : allocatedBuffers.values())
          if (buff.modifyingTx() == txnum)
-         buff.flush();
+            buff.flush();
    }
    
    /**
@@ -52,9 +82,10 @@ public class BufferMgr {
     */
    public synchronized void unpin(Buffer buff) {
       buff.unpin();
-      if (!buff.isPinned()) {
+      if (!buff.isPinned()) { // unpinned
+         unpinnedBuffers.addLast(buff); // add it to the end of the LRU list
          numAvailable++;
-         notifyAll();
+         notifyAll(); // notify any waiting threads
       }
    }
    
@@ -70,7 +101,7 @@ public class BufferMgr {
       try {
          long timestamp = System.currentTimeMillis();
          Buffer buff = tryToPin(blk);
-         while (buff == null && !waitingTooLong(timestamp)) {
+         while (buff == null && !waitingTooLong(timestamp)) { // try for 10 seconds
             wait(MAX_TIME);
             buff = tryToPin(blk);
          }
@@ -81,7 +112,7 @@ public class BufferMgr {
       catch(InterruptedException e) {
          throw new BufferAbortException();
       }
-   }  
+   }
    
    /**
     * Returns true if starttime is older than 10 seconds
@@ -95,7 +126,7 @@ public class BufferMgr {
    /**
     * Tries to pin a buffer to the specified block. 
     * If there is already a buffer assigned to that block
-    * then that buffer is used;  
+    * then that buffer is used;
     * otherwise, an unpinned buffer from the pool is chosen.
     * Returns a null value if there are no available buffers.
     * @param blk a reference to a disk block
@@ -104,25 +135,30 @@ public class BufferMgr {
    private Buffer tryToPin(BlockId blk) {
       Buffer buff = findExistingBuffer(blk);
       if (buff == null) {
-         buff = chooseUnpinnedBuffer();
+         buff = chooseReplacementBuffer();
          if (buff == null)
             return null;
+
          buff.assignToBlock(blk);
+         allocatedBuffers.remove(blk); // the mapping for the old block must be removed, and
+         allocatedBuffers.put(blk, buff); // the mapping for the new block must be added.
       }
-      if (!buff.isPinned())
+      if (!buff.isPinned()) { // unpinned
+         unpinnedBuffers.remove(buff); // remove from LRU list
          numAvailable--;
+      }
       buff.pin();
       return buff;
    }
    
    /**
-    * Find and return a buffer assigned to the specified block. 
+    * Find and return a buffer assigned to the specified block.
     * @param blk a reference to a disk block
-    * @return the found buffer       
+    * @return the found buffer
     */
    private Buffer findExistingBuffer(BlockId blk) {
-      for (Buffer buff : bufferpool) {
-         BlockId b = buff.block();
+      for (Buffer buff : allocatedBuffers.values()) {
+         BlockId b = buff.block(); // return BlockID
          if (b != null && b.equals(blk))
             return buff;
       }
@@ -130,13 +166,15 @@ public class BufferMgr {
    }
    
    /**
-    * Find and return an unpinned buffer     . 
-    * @return the unpinned buffer       
+    * Find and return an available buffer (either unallocated or unpinned) for replacement.
+    * @return the replacement buffer
     */
-   private Buffer chooseUnpinnedBuffer() {
-      for (Buffer buff : bufferpool)
-         if (!buff.isPinned())
-         return buff;
-      return null;
+   private Buffer chooseReplacementBuffer() {
+      if (!unallocatedBuffers.isEmpty())
+         return unallocatedBuffers.removeFirst();
+      else if (!unpinnedBuffers.isEmpty())
+         return unpinnedBuffers.removeFirst(); // remove the buffer at the head of the list
+      else
+         return null;
    }
 }
