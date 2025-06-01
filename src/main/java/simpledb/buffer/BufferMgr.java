@@ -1,11 +1,8 @@
 package simpledb.buffer;
 
+import java.util.*;
 import simpledb.file.*;
 import simpledb.log.LogMgr;
-
-import java.util.LinkedList;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Manages the pinning and unpinning of buffers to blocks.
@@ -127,7 +124,7 @@ public class BufferMgr {
     * Tries to pin a buffer to the specified block. 
     * If there is already a buffer assigned to that block
     * then that buffer is used;
-    * otherwise, an unpinned buffer from the pool is chosen.
+    * otherwise, an unallocated or unpinned buffer is chosen.
     * Returns a null value if there are no available buffers.
     * @param blk a reference to a disk block
     * @return the pinned buffer

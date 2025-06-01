@@ -1,8 +1,8 @@
 package simpledb.file;
 
 public class BlockId {
-   private String filename;
-   private int blknum;
+   private final String filename;
+   private final int blknum;
 
    public BlockId(String filename, int blknum) {
       this.filename = filename;
