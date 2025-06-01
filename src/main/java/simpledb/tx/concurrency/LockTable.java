@@ -6,12 +6,15 @@ import simpledb.file.BlockId;
 /**
  * The lock table, which provides methods to lock and unlock blocks.
  * If a transaction requests a lock that causes a conflict with an
- * existing lock, then that transaction is placed on a wait list.
+ * existing lock, then the transaction either waits or is aborted
+ * based on the wait-die scheme.
+ * Under the wait-die scheme, older transactions wait, while younger
+ * transactions are aborted to prevent deadlocks.
  * There is only one wait list for all blocks.
- * When the last lock on a block is unlocked, then all transactions
- * are removed from the wait list and rescheduled.
- * If one of those transactions discovers that the lock it is waiting for
- * is still locked, it will place itself back on the wait list.
+ * When the last lock on a block is released, then all transactions
+ * waiting for that block are rescheduled.
+ * If a transaction discovers that the lock it is waiting for
+ * is still held by an older transaction, it is aborted and rolled back.
  * @author Edward Sciore
  */
 class LockTable {
@@ -20,30 +23,33 @@ class LockTable {
    /**
     * Grant an SLock on the specified block.
     * If an XLock exists when the method is called,
-    * then the calling thread will be placed on a wait list
-    * until the lock is released.
-    * If the thread remains on the wait list for a certain 
-    * amount of time (currently 10 seconds),
-    * then an exception is thrown.
+    * then the calling transaction will either wait or be aborted
+    * based on the wait-die scheme.
+    * Under the wait-die scheme, older transactions wait,
+    * while younger transactions are aborted to prevent deadlocks.
     * @param blk a reference to the disk block
+    * @param txnum the transaction id requesting the lock
     */
    public synchronized void sLock(BlockId blk, int txnum) { // slock: shared lock (Read-only)
-      while(true) { // wait
-         if (locks.get(blk) == null) { // unlock
-            locks.put(blk, new ArrayList<>());
-            locks.get(blk).add(txnum);
+      while(true) {
+         List<Integer> holders = locks.get(blk);
+         if (holders == null) { // unlock
+            holders = new ArrayList<>();
+            holders.add(txnum);
+            locks.put(blk, holders);
             break;
-         } else if (locks.get(blk).get(0) < 0) { // xlock
-            if (-locks.get(blk).get(0) < txnum)
+         } else if (hasXlock(holders)) { // xlock
+            int holderTx = -holders.get(0);
+            if (holderTx < txnum)
                throw new LockAbortException(); // die
-            else // wait
+            else
                try {
-                  wait();
+                  wait(); // wait
                } catch (InterruptedException e) {
                   throw new LockAbortException();
                }
          } else { // slock
-            locks.get(blk).add(txnum);
+            holders.add(txnum); // compatible
             break;
          }
       }
@@ -52,41 +58,45 @@ class LockTable {
    /**
     * Grant an XLock on the specified block.
     * If a lock of any type exists when the method is called,
-    * then the calling thread will be placed on a wait list
-    * until the locks are released.
-    * If the thread remains on the wait list for a certain 
-    * amount of time (currently 10 seconds),
-    * then an exception is thrown.
+    * then the calling transaction will either wait or be aborted
+    * based on the wait-die scheme.
+    * Under the wait-die scheme, older transactions wait,
+    * while younger transactions are aborted to prevent deadlocks.
     * @param blk a reference to the disk block
+    * @param txnum the transaction id requesting the lock
     */
    synchronized void xLock(BlockId blk, int txnum) { // xlock: Exclusive lock (Write-only)
-      while(true) { // wait
-         if (locks.get(blk) == null) { // unlock
+      while(true) {
+         List<Integer> holders = locks.get(blk);
+         if (holders == null) { // unlock
             continue;
-         } else if (locks.get(blk).get(0) < 0) { // xlock
-            if (-locks.get(blk).get(0) < txnum)
+         } else if (hasXlock(holders)) { // xlock
+            int holderTx = -holders.get(0);
+            if (holderTx < txnum)
                throw new LockAbortException(); // die
-            else // wait
+            else
                try {
-                  wait();
+                  wait(); // wait
                } catch (InterruptedException e) {
                   throw new LockAbortException();
                }
          } else { // slock
-            if (locks.get(blk).size() == 1 && locks.get(blk).get(0) == txnum) { // slock with same txnum
-               locks.get(blk).set(0, -txnum); // upgrade it to xlock
+            // upgrade slock to xlock if only held by the same txnum
+            if (holders.size() == 1 && holders.get(0) == txnum) {
+               holders.set(0, -txnum);
                break;
             }
 
-            Collections.sort(locks.get(blk));
-            if (locks.get(blk).get(0) < txnum)
-               throw new LockAbortException(); // die
-            else // wait
-               try {
-                  wait();
-               } catch (InterruptedException e) {
-                  throw new LockAbortException();
-               }
+            for (int holderTx : holders) {
+               if (holderTx < txnum)
+                  throw new LockAbortException(); // die
+            }
+
+            try {
+               wait(); // wait
+            } catch (InterruptedException e) {
+               throw new LockAbortException();
+            }
          }
       }
    }
@@ -96,18 +106,24 @@ class LockTable {
     * If this lock is the last lock on that block,
     * then the waiting transactions are notified.
     * @param blk a reference to the disk block
+    * @param txnum the transaction id requesting the lock
     */
    synchronized void unlock(BlockId blk, int txnum) {
-      if (locks.get(blk).get(0) < 0) // xlock
-         if (locks.get(blk).get(0) == -txnum) {
+      List<Integer> holders = locks.get(blk);
+      if (hasXlock(holders)) // xlock
+         if (holders.get(0) == -txnum) {
             locks.remove(blk);
             notifyAll();
          }
       else { // slock
-         locks.get(blk).remove((Integer) txnum);
-         if (locks.get(blk).isEmpty())
+         holders.remove((Integer) txnum);
+         if (holders.isEmpty())
             locks.remove(blk);
          notifyAll();
       }
+   }
+
+   private boolean hasXlock(List<Integer> holders) {
+      return holders.get(0) < 0;
    }
 }

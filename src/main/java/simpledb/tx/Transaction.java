@@ -13,9 +13,10 @@ import simpledb.tx.concurrency.ConcurrencyMgr;
  * @author Edward Sciore
  */
 public class Transaction {
-   private static int nextTxNum = 0; /* ID of the transaction */
+   private static int nextTxNum = 0;
    private static final int END_OF_FILE = -1;
-   private final int txnum;
+
+   private final int txnum; /* ID of the transaction */
    private final FileMgr fm;
    private final BufferMgr bm;
    private final RecoveryMgr recoveryMgr;
@@ -30,8 +31,8 @@ public class Transaction {
     * {@link simpledb.server.SimpleDB}.
     * Those objects are created during system initialization.
     * Thus, this constructor cannot be called until either
-    * {@link simpledb.server.SimpleDB#init(String)} or
-    * {@link simpledb.server.SimpleDB#initFileLogAndBufferMgr(String)} or
+    * {@link simpledb.server.SimpleDB#SimpleDB(String)} or
+    * {@link simpledb.server.SimpleDB#SimpleDB(String, int, int)} or
     * is called first.
     */
    public Transaction(FileMgr fm, LogMgr lm, BufferMgr bm) {
@@ -39,7 +40,7 @@ public class Transaction {
       this.fm = fm;
       this.bm = bm;
       recoveryMgr = new RecoveryMgr(this, txnum, lm, bm);
-      concurMgr = new ConcurrencyMgr(txnum);
+      concurMgr = new ConcurrencyMgr(txnum); // passing the transaction id
       mybuffers = new BufferList(bm);
    }
    
@@ -198,7 +199,7 @@ public class Transaction {
     * Append a new block to the end of the specified file
     * and returns a reference to it.
     * This method first obtains an XLock on the
-    * "end of the file", before performing the append.
+    * "end of the file", before performing the appending.
     * @param filename the name of the file
     * @return a reference to the newly-created disk block
     */
